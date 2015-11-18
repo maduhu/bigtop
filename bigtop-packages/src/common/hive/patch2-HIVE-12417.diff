@@ -1,0 +1,11 @@
+--- apache-hive-1.2.1-src/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveLexer.g.ORG	2015-11-17 07:16:49.775373621 +0000
++++ apache-hive-1.2.1-src/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveLexer.g	2015-11-17 07:17:14.243808059 +0000
+@@ -372,7 +372,7 @@
+     : 'a'..'z' | 'A'..'Z' | '0'..'9' | '_'
+     | PLUS | STAR | QUESTION | MINUS | DOT
+     | LPAREN | RPAREN | LSQUARE | RSQUARE | LCURLY | RCURLY
+-    | BITWISEXOR | BITWISEOR | DOLLAR
++    | BITWISEXOR | BITWISEOR | DOLLAR | '!'
+     ;
+ 
+ StringLiteral
