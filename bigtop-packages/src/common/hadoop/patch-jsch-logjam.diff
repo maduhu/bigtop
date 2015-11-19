@@ -1,0 +1,11 @@
+--- hadoop-2.7.1-src/hadoop-project/pom.xml_	2015-11-19 08:28:51.803982881 +0000
++++ hadoop-2.7.1-src/hadoop-project/pom.xml	2015-11-19 08:29:01.904160905 +0000
+@@ -782,7 +782,7 @@
+       <dependency>
+         <groupId>com.jcraft</groupId>
+         <artifactId>jsch</artifactId>
+-        <version>0.1.42</version>
++        <version>0.1.53</version>
+       </dependency>
+       <dependency>
+         <groupId>org.apache.htrace</groupId>
