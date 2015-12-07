@@ -114,6 +114,7 @@ Version: ${config.bigtop.version}
 Architectures: i386 amd64 source
 Components: contrib
 Description: Bigtop
+SignWith: opensoft@science-computing.de
 """;
 }
 
