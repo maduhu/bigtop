@@ -55,6 +55,13 @@
     <name>yarn.nodemanager.linux-container-executor.group</name>
     <value>yarn</value>
   </property>
+
+<% if defined? @yarn_resourcemanager_zk_acl -%>
+  <property>
+    <name>yarn.resourcemanager.zk-acl</name>
+    <value><%= @yarn_resourcemanager_zk_acl %></value>
+  </property>
+<% end -%>
 <% end %>
 
 <% if @hadoop_ps_host %>
@@ -65,7 +72,6 @@
 <% end %>
 
 <% if @yarn_resourcemanager_ha_enabled -%>
-
   <property>
     <name>yarn.resourcemanager.ha.enabled</name>
     <value><%= @yarn_resourcemanager_ha_enabled %></value>
@@ -79,6 +85,11 @@
   <property>
     <name>yarn.resourcemanager.ha.rm-ids</name>
     <value><%= (1..resourcemanager_hosts.length).map { |n| "rm#{n}" }.join(",") %></value>
+  </property>
+
+  <property>
+    <name>yarn.resourcemanager.recovery.enabled</name>
+    <value>true</value>
   </property>
 
 <%   resourcemanager_hosts.each_with_index do |host,idx| -%>
@@ -112,6 +123,11 @@
   <property>
     <name>yarn.resourcemanager.zk-address</name>
     <value><%= @yarn_resourcemanager_zk_address %></value>
+  </property>
+
+  <property>
+    <name>yarn.resourcemanager.store.class</name>
+    <value>org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore</value>
   </property>
 <% end -%>
 <% else -%>

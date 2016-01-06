@@ -184,6 +184,12 @@
   </property>
 
 <% end -%>
+
+  <property>
+    <name>mapreduce.job.reduces</name>
+    <value>20</value>
+  </property>
+
 <% if @mapreduce_job_reduce_slowstart_completedmaps -%>
   <property>
     <name>mapreduce.job.reduce.slowstart.completedmaps</name>
