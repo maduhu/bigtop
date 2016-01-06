@@ -51,11 +51,26 @@
 </property>
 <% end -%>
 
-<% if @ha == "auto" and @zk -%>
+
+<% if @ha == "auto" -%>
+<%   if @zk -%>
   <property>
     <name>ha.zookeeper.quorum</name>
     <value><%= @zk %></value>
   </property>
+<%   end -%>
+<%   if @zkfc_port -%>
+  <property>
+    <name>ha.dfs.zkfc.port</name>
+    <value><%= @zkfc_port %></value>
+  </property>
+<%   end -%>
+<%   if @hadoop_security_authentication == "kerberos" %>
+  <property>
+    <name>ha.zookeeper.acl</name>
+    <value><%= @ha_zookeeper_acl %></value>
+  </property>
+<%   end -%>
 <% end -%>
 
   <property>
@@ -157,5 +172,11 @@
     <value><%= @hadoop_http_authentication_cookie_domain %></value>
   </property>
 
+<% end -%>
+<% if @net_topology_script -%>
+  <property>
+    <name>net.topology.script.file.name</name>
+    <value>/etc/hadoop/conf/<%= @net_topology_script %></value>
+  </property>
 <% end -%>
 </configuration>

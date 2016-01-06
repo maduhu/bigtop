@@ -44,6 +44,7 @@
 <%= shell_config("HADOOP_OPTS") %>
 
 # Command specific options appended to HADOOP_OPTS when specified
+<%= shell_config("HADOOP_ZKFC_OPTS", "hadoop_zkfc_opts_cnf") %>
 <%= shell_config("HADOOP_NAMENODE_OPTS") %>
 <%= shell_config("HADOOP_SECONDARYNAMENODE_OPTS") %>
 <%= shell_config("HADOOP_DATANODE_OPTS") %>

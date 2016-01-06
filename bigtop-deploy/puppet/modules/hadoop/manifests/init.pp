@@ -93,6 +93,8 @@ class hadoop ($hadoop_security_authentication = "simple",
       $hadoop_classpath = undef,
       $hadoop_heapsize = undef,
       $hadoop_opts = undef,
+      $hadoop_zkfc_opts = undef,
+      $zkfc_jaas_conf = '/etc/hadoop/conf/zkfc-jaas.conf',
       $hadoop_namenode_opts = undef,
       $hadoop_secondarynamenode_opts = undef,
       $hadoop_datanode_opts = undef,
@@ -112,6 +114,13 @@ class hadoop ($hadoop_security_authentication = "simple",
       $tez_conf_dir = undef,
       $tez_jars = undef,
   ) inherits hadoop {
+    if $hadoop_security_authentication == "kerberos" {
+      $hadoop_zkfc_jaas_opts = "-Djava.security.auth.login.config=$zkfc_jaas_conf"
+      $hadoop_zkfc_opts_cnf = $hadoop_zkfc_opts ? {
+        undef => $hadoop_zkfc_jaas_opts,
+        default => "$hadoop_zkfc_jaas_opts $hadoop_zkfc_opts",
+      }
+    }
 
     file {
       "/etc/hadoop/conf/hadoop-env.sh":
@@ -140,13 +149,18 @@ class hadoop ($hadoop_security_authentication = "simple",
       $hadoop_rm_webapp_port = "8088",
       $hadoop_rt_port = "8025",
       $hadoop_sc_port = "8030",
+      $yarn_jaas_conf = '/etc/hadoop/conf/yarn-jaas.conf',
+      $yarn_nodemanager_opts = undef,
       $yarn_nodemanager_resource_memory_mb = undef,
       $yarn_scheduler_maximum_allocation_mb = undef,
       $yarn_scheduler_minimum_allocation_mb = undef,
+      $yarn_resourcemanager_opts = undef,
       $yarn_resourcemanager_scheduler_class = undef,
       $yarn_resourcemanager_ha_enabled = undef,
       $yarn_resourcemanager_cluster_id = "ha-rm-uri",
       $yarn_resourcemanager_zk_address = $hadoop::zk,
+      # currently only applied if kerberos security is in use
+      $yarn_resourcemanager_zk_acl = "sasl:yarn:cdrwa",
       # work around https://issues.apache.org/jira/browse/YARN-2847 by default
       $container_executor_banned_users = "doesnotexist",
       $container_executor_min_user_id = "499",
@@ -155,6 +169,14 @@ class hadoop ($hadoop_security_authentication = "simple",
   ) inherits hadoop {
 
     include common
+
+    if $hadoop_security_authentication == "kerberos" {
+      $yarn_jaas_opts = "-Djava.security.auth.login.config=$yarn_jaas_conf"
+      $yarn_resourcemanager_opts_cnf = $yarn_resourcemanager_opts ? {
+        undef => $yarn_jaas_opts,
+        default => "$yarn_jaas_opts $yarn_resourcemanager_opts",
+      }
+    }
 
     package { "hadoop-yarn":
       ensure => latest,
@@ -171,6 +193,11 @@ class hadoop ($hadoop_security_authentication = "simple",
         # wan't to give the keytab to.
         require => Package["hadoop-yarn"],
       }
+    }
+
+    file { "/etc/hadoop/conf/yarn-env.sh":
+      content => template('hadoop/yarn-env.sh'),
+      require => [Package["hadoop"]],
     }
 
     file {
@@ -194,6 +221,9 @@ class hadoop ($hadoop_security_authentication = "simple",
       $hadoop_namenode_port = "8020",
       $hadoop_namenode_http_port = "50070",
       $hadoop_namenode_https_port = "50470",
+      $zkfc_port = "8019",
+      # currently only applied if kerberos security is in use
+      $ha_zookeeper_acl = "sasl:hdfs:cdrwa",
       $hdfs_data_dirs = suffix($hadoop::hadoop_storage_dirs, "/hdfs"),
       $hdfs_shortcut_reader = undef,
       $hdfs_support_append = undef,
@@ -228,7 +258,10 @@ class hadoop ($hadoop_security_authentication = "simple",
       $hadoop_http_authentication_signature_secret = undef,
       $hadoop_http_authentication_signature_secret_file = "/etc/hadoop/conf/hadoop-http-authentication-signature-secret",
       $hadoop_http_authentication_cookie_domain = regsubst($fqdn, "^[^\\.]+\\.", ""),
+      $dfs_namenode_resource_du_reserved = undef,
       $generate_secrets = $hadoop::generate_secrets,
+      $net_topology_script = undef,
+      $dfs_datanode_failed_volumes_tolerated = undef,
   ) inherits hadoop {
 
     $sshfence_keydir  = "$hadoop_ha_sshfence_user_home/.ssh"
@@ -271,10 +304,16 @@ class hadoop ($hadoop_security_authentication = "simple",
         require => File[$ssh_user_keydir],
       }
     }
-    if ($hadoop_security_authentication == "kerberos" and $ha != "disabled") {
-      fail("High-availability secure clusters are not currently supported")
-    }
 
+    if ($net_topology_script != undef) {
+      file { "/etc/hadoop/conf/$net_topology_script":
+         source  => "puppet:///modules/hadoop/$net_topology_script",
+         owner   => 'hdfs',
+         group   => 'hdfs',
+         mode    =>  0755,
+	 require => Package["hadoop-hdfs"],
+      }
+    }
     package { "hadoop-hdfs":
       ensure => latest,
       require => [Package["jdk"], Package["hadoop"]],
@@ -283,7 +322,7 @@ class hadoop ($hadoop_security_authentication = "simple",
     if ($hadoop_security_authentication == "kerberos") {
       require kerberos::client
       kerberos::host_keytab { "hdfs":
-        princs => [ "hdfs", "host" ],
+        princs => [ "hdfs", "hdfshttps" ],
         spnego => true,
         # we don't actually need this package as long as we don't put the
         # keytab in a directory managed by it. But it creates user hdfs whom we
@@ -310,9 +349,6 @@ class hadoop ($hadoop_security_authentication = "simple",
       } else {
         $http_auth_sig_secret = $hadoop_http_authentication_signature_secret
       }
-      if $http_auth_sig_secret == undef {
-        fail("Hadoop HTTP authentication signature secret must be set")
-      }
 
       file { 'hadoop-http-auth-sig-secret':
         path => "${hadoop_http_authentication_signature_secret_file}",
@@ -322,7 +358,7 @@ class hadoop ($hadoop_security_authentication = "simple",
         owner => "root",
         # allows access by hdfs and yarn (and mapred - mhmm...)
         group => "hadoop",
-        content => $http_auth_sig_secret,
+        content => inline_template("<%= @http_auth_sig_secret %>"),
         require => [Package["hadoop"]],
       }
 
@@ -435,6 +471,20 @@ class hadoop ($hadoop_security_authentication = "simple",
     Kerberos::Host_keytab <| title == "hdfs" |> -> Service["hadoop-hdfs-datanode"]
     Service<| title == 'hadoop-hdfs-namenode' |> -> Service['hadoop-hdfs-datanode']
 
+    # inter-node-inter-service dependencies: if this host is to be a zookeeper
+    # for a journalnode or journalnode for a namenode (both possibly not
+    # running here), we need to start it before trying to start the datanode.
+    # While the datanode does not need the zookeeper or journal, it needs the
+    # namenodes to work which (possibly) depend on the journalnodes which
+    # depend on the zookeeper. This still does not make sure that the namenode
+    # running on the other host will be up in time for the datanode to work but
+    # at least it gives it a fighting chance to get there before timeouts in
+    # the datanode startup expire.
+    # We can do this here unconditionally because we're picking
+    # dependencies up dynamically using resource collectors.
+    Service<| title == 'zookeeper-server' |> -> Service['hadoop-hdfs-datanode']
+    Service<| title == 'hadoop-hdfs-journalnode' |> -> Service['hadoop-hdfs-datanode']
+
     hadoop::create_storage_dir { $hadoop::common_hdfs::hdfs_data_dirs: } ->
     file { $hadoop::common_hdfs::hdfs_data_dirs:
       ensure => directory,
@@ -452,7 +502,6 @@ class hadoop ($hadoop_security_authentication = "simple",
       $hadoop_security_authentcation = $hadoop::hadoop_security_authentication,
       $kerberos_realm = $hadoop::kerberos_realm,
   ) inherits hadoop {
-    include common_hdfs
 
     if ($hadoop_security_authentication == "kerberos") {
       kerberos::host_keytab { "httpfs":
@@ -486,7 +535,7 @@ class hadoop ($hadoop_security_authentication = "simple",
     }
 
     file { "/etc/hadoop-httpfs/conf/httpfs-signature.secret":
-      content => $httpfs_signature_secret,
+      content => inline_template("<%= @httpfs_signature_secret %>"),
       # it's a password file - do not filebucket
       backup => false,
       require => [Package["hadoop-httpfs"]],
@@ -500,6 +549,11 @@ class hadoop ($hadoop_security_authentication = "simple",
       require => [ Package["hadoop-httpfs"] ],
     }
     Kerberos::Host_keytab <| title == "httpfs" |> -> Service["hadoop-httpfs"]
+
+    # httpfs does not strictly need the namenode to be up to start. But it
+    # needs HDFS to work to be able to do anything useful. Misleading errors
+    # have been seen in hue, if httpfs was started before the namenode.
+    Service<| title == "hadoop-hdfs-namenode" |> -> Service["hadoop-httpfs"]
   }
 
   class kinit {
@@ -548,9 +602,21 @@ class hadoop ($hadoop_security_authentication = "simple",
   }
 
   class namenode ( $nfs_server = "", $nfs_path = "",
+      # starting java is expensive, so less tries with longer intervals
       $standby_bootstrap_retries = 10,
       # milliseconds
-      $standby_bootstrap_retry_interval = 30000) {
+      $standby_bootstrap_retry_interval = $hadoop_bootstrap ? { '1' => 180000, default => 30000 },
+      $zkfc_portcheck_package = "netcat",
+      $zkfc_portcheck_command = "netcat -z -w 1",
+      $zkfc_portcheck_tries = 30,
+      # increase retry interval if custom facter fact indicates we're
+      # bootstrapping. In that case other nodes might take more time to reach a
+      # usable state. Use with e.g FACTER_hadoop_bootstrap=1 puppet agent -t
+      $zkfc_portcheck_sleep = $hadoop_bootstrap ? { '1' => 60, default => 5 },
+      $hadoop_security_authentication = $hadoop::hadoop_security_authentication,
+      $kerberos_realm = $hadoop::kerberos_realm,
+  ) {
+
     include common_hdfs
 
     if ($hadoop::common_hdfs::ha != 'disabled') {
@@ -619,6 +685,16 @@ class hadoop ($hadoop_security_authentication = "simple",
     } 
     Kerberos::Host_keytab <| title == "hdfs" |> -> Exec <| tag == "namenode-format" |> -> Service["hadoop-hdfs-namenode"]
 
+    # inter-node-inter-service dependencies: if this node is also a zookeeper
+    # or journalnode, it needs to be running for the namenode to work.
+    # While the namenode does not directly require the zookeeper, a journalnode
+    # running on another host might need it to be running. We can do this here
+    # and not in an $ha = "auto" block because we're using resource collectors.
+    # FIXME: Does not handle possible dependency of this namenode on zookeepers
+    # and journalnodes on other nodes.
+    Service<| title == "zookeeper-server" |> -> Service["hadoop-hdfs-namenode"]
+    Service<| title == "hadoop-hdfs-journalnode" |> -> Service["hadoop-hdfs-namenode"]
+
     if ($hadoop::common_hdfs::ha == "auto") {
       package { "hadoop-hdfs-zkfc":
         ensure => latest,
@@ -629,9 +705,17 @@ class hadoop ($hadoop_security_authentication = "simple",
         ensure => running,
         hasstatus => true,
         subscribe => [Package["hadoop-hdfs-zkfc"], File["/etc/hadoop/conf/core-site.xml"], File["/etc/hadoop/conf/hdfs-site.xml"], File["/etc/hadoop/conf/hadoop-env.sh"]],
-        require => [Package["hadoop-hdfs-zkfc"]],
+        require => Package["hadoop-hdfs-zkfc"],
       } 
       Service <| title == "hadoop-hdfs-zkfc" |> -> Service <| title == "hadoop-hdfs-namenode" |>
+
+      if $hadoop_security_authentication == "kerberos" {
+        file { $hadoop::common::zkfc_jaas_conf:
+          content => template('hadoop/zkfc-jaas.conf'),
+          require => Package['hadoop-hdfs-zkfc'],
+          notify  => Service['hadoop-hdfs-zkfc'],
+	}
+      }
     }
 
     $namenode_array = any2array($hadoop::common_hdfs::hadoop_namenode_host)
@@ -648,11 +732,15 @@ class hadoop ($hadoop_security_authentication = "simple",
 
       if ($hadoop::common_hdfs::ha != "disabled") {
         if ($hadoop::common_hdfs::ha == "auto") {
+          # namenode format needs the journalnode to be running (if on this box)
+          # FIXME: inter-machine dependency
+          Service<| title == "hadoop-hdfs-journalnode" |> -> Exec['namenode format']
+
           exec { "namenode zk format":
             user => "hdfs",
             command => "/bin/bash -c 'hdfs zkfc -formatZK -nonInteractive >> /var/lib/hadoop-hdfs/zk.format.log 2>&1'",
             returns => [ 0, 2],
-            require => [ Package["hadoop-hdfs-zkfc"], File["/etc/hadoop/conf/hdfs-site.xml"] ],
+            require => [ Package["hadoop-hdfs-zkfc"], File["/etc/hadoop/conf/hdfs-site.xml"],  File["/etc/hadoop/conf/core-site.xml"]],
             tag     => "namenode-format",
           }
           Service <| title == "zookeeper-server" |> -> Exec <| title == "namenode zk format" |>
@@ -678,6 +766,29 @@ class hadoop ($hadoop_security_authentication = "simple",
         require => [ Package["hadoop-hdfs-namenode"], File[$hadoop::common_hdfs::namenode_data_dirs], File["/etc/hadoop/conf/hdfs-site.xml"] ],
         tag     => "namenode-format",
       }
+
+      # inter-node-dependency: we need to wait for zkfc on the first namenode
+      # to be formatted and started before starting ours or it will fail with:
+      # "Unable to start failover controller. Parent znode does not exist."
+      if !defined(Package[$zkfc_portcheck_package]) {
+        package { $zkfc_portcheck_package: ensure => present }
+      }
+      exec{'zkfc wait for format':
+        command => "$zkfc_portcheck_command ${first_namenode} ${hadoop::common_hdfs::zkfc_port}",
+        path => [ "/bin", "/usr/bin" ],
+        tries => $zkfc_portcheck_tries,
+        try_sleep => $zkfc_portcheck_sleep,
+        require => Package[$zkfc_portcheck_package]
+      }
+      Exec['zkfc wait for format'] -> Service['hadoop-hdfs-zkfc']
+
+      # inter-node-inter-service depencencies: if this node is also to run
+      # zookeeper and journalnode, do our waiting for zkfc after we've done
+      # those because other nodes might again wait for our node to start
+      # zookeeper and journalnode to continue starting their services including
+      # zkfc
+      Service<| title == "zookeeper-server" |> -> Exec['zkfc wait for format']
+      Service<| title == "hadoop-hdfs-journalnode" |> -> Exec['zkfc wait for format']
     } elsif ($hadoop::common_hdfs::ha != "disabled") {
       hadoop::namedir_copy { $hadoop::common_hdfs::namenode_data_dirs:
         source       => $first_namenode,
@@ -759,6 +870,7 @@ class hadoop ($hadoop_security_authentication = "simple",
                     File["/etc/hadoop/conf/hdfs-site.xml"], File["/etc/hadoop/conf/core-site.xml"]],
       require => [ Package["hadoop-hdfs-journalnode"], File[$journalnode_cluster_journal_dir] ],
     }
+    Kerberos::Host_keytab <| title == "hdfs" |> -> Service["hadoop-hdfs-journalnode"]
 
     hadoop::create_storage_dir { [$hadoop::common_hdfs::journalnode_edits_dir, $journalnode_cluster_journal_dir]: } ->
     file { [ "${hadoop::common_hdfs::journalnode_edits_dir}", "$journalnode_cluster_journal_dir" ]:
@@ -768,11 +880,27 @@ class hadoop ($hadoop_security_authentication = "simple",
       mode => 755,
       require => [Package["hadoop-hdfs"]],
     }
+
+    # if this node is also a zookeeper node, it needs to be running for the
+    # journalnode to work.
+    # FIXME: Does not handle dependency on zookeepers on other nodes.
+    Service<| title == "zookeeper-server" |> -> Service["hadoop-hdfs-journalnode"]
   }
 
 
-  class resourcemanager {
+  class resourcemanager (
+    $hadoop_security_authentication = $hadoop::hadoop_security_authentication,
+    $kerberos_realm = $hadoop::kerberos_realm,
+  ) {
     include common_yarn
+
+    if $hadoop_security_authentication == "kerberos" {
+      file { $hadoop::common_yarn::yarn_jaas_conf:
+        content => template('hadoop/yarn-jaas.conf'),
+        require => Package['hadoop'],
+        notify  => Service['hadoop-yarn-resourcemanager'],
+      }
+    }
 
     package { "hadoop-yarn-resourcemanager":
       ensure => latest,
@@ -839,7 +967,7 @@ class hadoop ($hadoop_security_authentication = "simple",
       hasstatus => true,
       subscribe => [Package["hadoop-yarn-nodemanager"], File["/etc/hadoop/conf/hadoop-env.sh"], 
                     File["/etc/hadoop/conf/yarn-site.xml"], File["/etc/hadoop/conf/core-site.xml"]],
-      require => [ Package["hadoop-yarn-nodemanager"], File[$hadoop::common_yarn::yarn_data_dirs] ],
+      require => [ Package["hadoop-mapreduce"], Package["hadoop-yarn-nodemanager"], File[$hadoop::common_yarn::yarn_data_dirs] ],
     }
     Kerberos::Host_keytab <| tag == "mapreduce" |> -> Service["hadoop-yarn-nodemanager"]
 
