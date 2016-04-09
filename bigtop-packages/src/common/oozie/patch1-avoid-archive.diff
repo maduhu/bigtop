@@ -1,0 +1,11 @@
+--- a/distro/pom.xml	2016-04-09 09:52:38.043994024 +0200
++++ b/distro/pom.xml.new	2016-04-09 09:51:40.403994135 +0200
+@@ -88,7 +88,7 @@
+                         <configuration>
+                             <target>
+                                 <mkdir dir="downloads"/>
+-                                <get src="http://archive.apache.org/dist/tomcat/tomcat-6/v${tomcat.version}/bin/apache-tomcat-${tomcat.version}.tar.gz"
++                                <get src="http://www-us.apache.org/dist/tomcat/tomcat-6/v${tomcat.version}/bin/apache-tomcat-${tomcat.version}.tar.gz"
+                                      dest="downloads/tomcat-${tomcat.version}.tar.gz" verbose="true" skipexisting="true"/>
+                                 <delete dir="target/tomcat"/>
+                                 <mkdir dir="target/tomcat"/>
