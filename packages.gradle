@@ -45,7 +45,7 @@ config.bigtop.builddir = projectDir.absolutePath + "/build"
 config.bigtop.outputdir = projectDir.absolutePath + "/output"
 config.bigtop.distdir = projectDir.absolutePath + "/dist"
 config.bigtop.dldir = projectDir.absolutePath + "/dl"
-config.bigtop.buildstamp = 1
+if(!config.bigtop.buildstamp) config.bigtop.buildstamp = 1
 
 def bomVersions = []
 
@@ -70,6 +70,12 @@ def ifExists = { url ->
   if (url == null) return
   URLConnection uCon = new URL(url).openConnection()
   return (uCon as HttpURLConnection).responseCode == 200
+}
+def safeDelete = { fileName ->
+  exec {
+    workingDir '.'
+    commandLine 'rm', '-rf', fileName
+  }
 }
 def getDate() {
   new Date().format('E, dd MMM yyyy HH:mm:ss Z')
@@ -101,7 +107,7 @@ def nativePackaging = {
     errorOutput devNull
     standardOutput devNull
   }
-  [false, "deb", "rpm"][result.getExitValue()]
+  [false, [pkg:"deb", repo:"apt"], [pkg:"rpm", repo:"yum"]][result.getExitValue()]
 }.call()
 
 def generateDistributionsFile = { file ->
@@ -111,7 +117,7 @@ Label: Bigtop
 Suite: stable
 Codename: bigtop
 Version: ${config.bigtop.version}
-Architectures: i386 amd64 source
+Architectures: amd64 ppc64el source
 Components: contrib
 Description: Bigtop
 SignWith: opensoft@science-computing.de
@@ -173,7 +179,7 @@ def genTasks = { target ->
       description: "Download $target artifacts",
       group: PACKAGES_GROUP) << {
 
-    def final TARBALL_SRC = config.bigtop.components[target].tarball.source
+    def final TARBALL_DST = config.bigtop.components[target].tarball.destination
     def final DOWNLOAD_DST = config.bigtop.components[target].downloaddst
     def final DOWNLOAD_URL = config.bigtop.components[target].downloadurl
 
@@ -181,18 +187,18 @@ def genTasks = { target ->
     def final GIT_REF = config.bigtop.components[target].git.ref
     def final GIT_DIR = config.bigtop.components[target].git.dir
 
-    if (!DOWNLOAD_DST)
+    if (!DOWNLOAD_URL)
       return
 
     mkdir(DL_DIR)
-    if (TARBALL_SRC?.isEmpty() || new File(DOWNLOAD_DST)?.exists() || new File(config.bigtop.components[target].targetdl)?.exists()) {
+    if (TARBALL_DST?.isEmpty() || new File(DOWNLOAD_DST)?.exists() || new File(config.bigtop.components[target].targetdl)?.exists()) {
       println "\tFile $DOWNLOAD_DST appears to be already downloaded. Exiting..."
       return
     }
     if (GIT_REPO && GIT_REF) {
       def dir = GIT_DIR
       if (dir == null || dir.isEmpty()) {
-        dir = TARBALL_SRC.substring(0, TARBALL_SRC.lastIndexOf(".t"))
+        dir = TARBALL_DST.substring(0, TARBALL_DST.lastIndexOf(".t"))
       }
       delete("${DL_DIR}/${dir}")
       Grgit.clone(
@@ -203,7 +209,7 @@ def genTasks = { target ->
       delete("${DL_DIR}/${dir}/.git")
       exec {
         workingDir DL_DIR
-        commandLine "tar -czf ${TARBALL_SRC} ${dir}".split()
+        commandLine "tar -czf ${TARBALL_DST} ${dir}".split()
       }
       delete("${DL_DIR}/${dir}")
     }
@@ -224,10 +230,11 @@ def genTasks = { target ->
     }
     def final TAR_DIR = config.bigtop.components[target].tardir
     def final TARBALL_SRC = config.bigtop.components[target].tarball.source ?: ""
+    def final TARBALL_DST = config.bigtop.components[target].tarball.destination
     def final DOWNLOAD_DST = config.bigtop.components[target].downloaddst ?: ""
     def final SEED_TAR = config.bigtop.components[target].seedtar
 
-    delete(TAR_DIR); mkdir(TAR_DIR)
+    safeDelete(TAR_DIR); mkdir(TAR_DIR)
 
     if (TARBALL_SRC.isEmpty() || TARBALL_SRC.endsWith('.zip')) {
       if (TARBALL_SRC.isEmpty()) {
@@ -251,7 +258,7 @@ def genTasks = { target ->
             (f != "." && f != "..")}).each { f ->
               new File("$TAR_DIR/$TOP_LEVEL_DIR/$f").renameTo("$TAR_DIR/$f")
           }
-          delete(TOP_LEVEL_DIR)
+          safeDelete(TOP_LEVEL_DIR)
         }
       }
       // create SEED_TAR
@@ -264,7 +271,7 @@ def genTasks = { target ->
       copy {
         from DOWNLOAD_DST
         into config.bigtop.builddir + "/$target/tar/"
-        rename TARBALL_SRC, SEED_TAR
+        rename TARBALL_DST, SEED_TAR
       }
     }
     touchTargetFile(config.bigtop.components[target].targettar)
@@ -283,6 +290,7 @@ def genTasks = { target ->
     def final PKG_OUTPUT_DIR = config.bigtop.components[target].outputdir
     def final BASE_VERSION = config.bigtop.components[target].version.base
     def final SRCDEB = "${PKG_NAME}_$PKG_VERSION-${BIGTOP_BUILD_STAMP}.dsc"
+    def final HADOOP_VERSION = config.bigtop.components["hadoop"].version.pkg
 
     exec {
       workingDir PKG_OUTPUT_DIR
@@ -295,6 +303,8 @@ def genTasks = { target ->
 --preserve-envvar MAVEN3_HOME \
 --preserve-envvar MAVEN_OPTS \
 --preserve-envvar JAVA_HOME \
+--preserve-envvar BIGTOP_JDK \
+--set-envvar=HADOOP_VERSION=$HADOOP_VERSION \
 --set-envvar=${toOldStyleName(target)}_BASE_VERSION=$BASE_VERSION \
 --set-envvar=${toOldStyleName(target)}_VERSION=$PKG_VERSION \
 --set-envvar=${toOldStyleName(target)}_RELEASE=$BIGTOP_BUILD_STAMP \
@@ -327,6 +337,8 @@ def genTasks = { target ->
       println "\tNothing to do. Exiting..."
       return
     }
+    def final TARBALL_SRC = config.bigtop.components[target].tarball.source
+    def final TARBALL_DST = config.bigtop.components[target].tarball.destination ?: TARBALL_SRC
     def final PKG_BUILD_DIR = config.bigtop.components[target].builddir
     def final NAME = config.bigtop.components[target].name
     def final PKG_NAME = config.bigtop.components[target].pkg
@@ -340,7 +352,7 @@ def genTasks = { target ->
     copy {
       from SEED_TAR
       into "$PKG_BUILD_DIR/deb/"
-      rename config.bigtop.components[target].tarball.destination, "${PKG_NAME}_${PKG_VERSION}.orig.tar.gz"
+      rename TARBALL_DST, "${PKG_NAME}_${PKG_VERSION}.orig.tar.gz"
     }
     exec {
       workingDir DEB_BLD_DIR
@@ -389,6 +401,7 @@ def genTasks = { target ->
     fileTree (dir: "$DEB_PKG_DIR/..", includes: ['*.dsc', '*.diff.gz', '*.debian.tar.gz', '*.debian.tar.xz', "*_source.changes", "*.orig.tar.gz" ]).copy {
       into PKG_OUTPUT_DIR
     }
+    safeDelete(DEB_BLD_DIR)
     touchTargetFile(config.bigtop.components[target].targetsdeb)
   }
 
@@ -406,12 +419,14 @@ def genTasks = { target ->
     def final PKG_OUTPUT_DIR = config.bigtop.components[target].outputdir
     def final PKG_VERSION = config.bigtop.components[target].version.pkg
     def final BASE_VERSION = config.bigtop.components[target].version.base
+    def final HADOOP_VERSION = config.bigtop.components["hadoop"].version.pkg
     def RELEASE_DIST = "rpmbuild --eval '%{?dist}' 2>/dev/null".execute().text.trim().replaceAll("'",'')
     def SRCRPM="$PKG_OUTPUT_DIR/$PKG_NAME-${PKG_VERSION}-$BIGTOP_BUILD_STAMP${RELEASE_DIST}.src.rpm"
 
     def command = [
         '--define', "_topdir $PKG_BUILD_DIR/rpm/",
         '--define', "${NAME}_base_version $BASE_VERSION",
+        '--define', "hadoop_version ${HADOOP_VERSION}",
         '--define', "${NAME}_version ${PKG_VERSION}",
         '--define', "${NAME}_release ${BIGTOP_BUILD_STAMP}%{?dist}",
         '--rebuild', SRCRPM,
@@ -450,7 +465,7 @@ def genTasks = { target ->
     def final PKG_VERSION = config.bigtop.components[target].version.pkg
     def final BASE_VERSION = config.bigtop.components[target].version.base
     def final PKG_OUTPUT_DIR = config.bigtop.components[target].outputdir
-    delete ("$PKG_BUILD_DIR/rpm")
+    safeDelete ("$PKG_BUILD_DIR/rpm")
     ['INSTALL','SOURCES','BUILD','SRPMS','RPMS'].each { rpmdir ->
       mkdir("$PKG_BUILD_DIR/rpm/$rpmdir")
     }
@@ -523,12 +538,13 @@ def genTasks = { target ->
     touchTargetFile(config.bigtop.components[target].targetsrpm)
   }
   if (nativePackaging) {
-    task "$target-pkg" (dependsOn: "$target-$nativePackaging",
-        description: "Invoking a native binary packaging target $nativePackaging",
+    def ptype = nativePackaging.pkg
+    task "$target-pkg" (dependsOn: "$target-$ptype",
+        description: "Invoking a native binary packaging target $ptype",
         group: PACKAGES_GROUP) << {
     }
-    task "$target-spkg" (dependsOn: "$target-s$nativePackaging",
-        description: "Invoking a native binary packaging target s$nativePackaging",
+    task "$target-spkg" (dependsOn: "$target-s$ptype",
+        description: "Invoking a native binary packaging target s$ptype",
         group: PACKAGES_GROUP) << {
     }
   }
@@ -551,8 +567,8 @@ def genTasks = { target ->
             !config.bigtop.components[target].url.site.isEmpty() &&
             !config.bigtop.components[target].tarball.source.isEmpty()) ?
             config.bigtop.components[target].url.site + '/' + config.bigtop.components[target].tarball.source : null
-        if (!config.bigtop.components[target].tarball.source.isEmpty())
-          config.bigtop.components[target].downloaddst = DL_DIR + '/' + config.bigtop.components[target].tarball.source
+        if (!config.bigtop.components[target].tarball.destination.isEmpty())
+          config.bigtop.components[target].downloaddst = DL_DIR + '/' + config.bigtop.components[target].tarball.destination
 
     // test that the download url will return http 200.  If it does not, use the ARCHIVE url instead of the MIRROR SITE url
     if (!config.bigtop.components[target].url.isEmpty() && !ifExists(config.bigtop.components[target].downloadurl)) {
@@ -592,8 +608,8 @@ def genTasks = { target ->
   task "$target-clean" (dependsOn: "${target}_vardefines",
       description: "Removing $target component build and output directories",
       group: PACKAGES_GROUP) << {
-    delete(config.bigtop.components[target].builddir)
-    delete(config.bigtop.components[target].outputdir)
+    safeDelete(config.bigtop.components[target].builddir)
+    safeDelete(config.bigtop.components[target].outputdir)
   }
   task "$target-help" (description: "List of available tasks for $target", group: PACKAGES_GROUP) << {
     println (target + "\n\t[" + tasks.findAll { alltask -> alltask.name.startsWith(target)}*.name.join(", ") + "]")
@@ -644,14 +660,18 @@ project.afterEvaluate {
       description: "Build all DEB packages for the stack components",
       group: PACKAGES_GROUP
   ) << { }
+  task "pkgs" (dependsOn: tasks.findAll { alltask -> alltask.name.endsWith("-pkg")}*.name,
+      description: "Build all native packages for the stack components",
+      group: PACKAGES_GROUP
+  ) << { }
 
   task allclean (dependsOn: [clean, tasks.findAll { alltask -> alltask.name.endsWith("-clean")}*.name],
       description: "Removing $BUILD_DIR, $OUTPUT_DIR, and $DIST_DIR.\n\t\t" +
         "Cleaning all components' build and output directories.",
       group: PACKAGES_GROUP) << {
-    delete (BUILD_DIR)
-    delete (OUTPUT_DIR)
-    delete (DIST_DIR)
+    safeDelete(BUILD_DIR)
+    safeDelete(OUTPUT_DIR)
+    safeDelete(DIST_DIR)
   }
   task realclean (dependsOn: allclean,
       description: "Removing $BUILD_DIR, $OUTPUT_DIR, $DIST_DIR, and $DL_DIR",
@@ -687,4 +707,10 @@ task "yum" (
     workingDir BUILD_DIR
     commandLine "createrepo -o $OUTPUT_DIR $OUTPUT_DIR".split(' ')
   }
+}
+
+if (nativePackaging) {
+  task "repo" (dependsOn: nativePackaging.repo,
+      description: "Invoking a native repository target ${nativePackaging.repo}",
+      group: PACKAGES_GROUP) << { }
 }

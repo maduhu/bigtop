@@ -68,7 +68,7 @@ rules will be used for the CTR process:
     there're doubts in the approach taken, design decision, or implementation
     details
   * a committer should keep an eye on the official CI builds at
-    http://ci.bigtop.apache.org/view/Bigtop-trunk/ (Bigtop-trunk-packages builds)
+    https://ci.bigtop.apache.org/view/Packages/job/Bigtop-trunk-packages/ (Bigtop-trunk-packages builds)
     to make sure that committed changes haven't break anything. In
     which case the committer should take a timely effort to resolve the issues
     and unblock the others in the community
@@ -97,10 +97,7 @@ For specific questions it's always a good idea to ping the mailing list at dev-s
 For Users: Running the smoke tests.
 -----------------------------------
 
-The simplest way to test bigtop is to:
-
-* Step 1: cd bigtop-tests/smoke-tests/
-* Step 2: Follow the instructions in the smoke-tests/README file.
+The simplest way to test bigtop is described in bigtop-tests/smoke-tests/README file
 
 For integration (API level) testing with maven, read on. 
 

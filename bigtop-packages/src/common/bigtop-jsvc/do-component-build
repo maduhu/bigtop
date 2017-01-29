@@ -19,7 +19,9 @@ set -ex
 rm -f jsvc
 
 pushd unix
-  ./configure --prefix=/usr
-  make
-  cp -f jsvc ../jsvc
+rm configure
+support/buildconf.sh
+./configure --prefix=/usr
+make
+cp -f jsvc ../jsvc
 popd

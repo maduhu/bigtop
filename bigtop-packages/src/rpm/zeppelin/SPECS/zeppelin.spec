@@ -38,7 +38,7 @@ Name: zeppelin
 Version: %{zeppelin_version}
 Release: %{zeppelin_release}
 Summary: Web-based notebook for Apache Spark
-URL: http://zeppelin.incubator.apache.org/
+URL: http://zeppelin.apache.org/
 Group: Applications/Engineering
 BuildArch: noarch
 Buildroot: %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
@@ -73,7 +73,7 @@ Zeppelin is a web-based notebook that enables interactive data analytics with Ap
 You can make beautiful data-driven, interactive and collaborative documents with SQL, Scala and more.
 
 %prep
-%setup -n %{name}-%{zeppelin_base_version}-incubating
+%setup -n %{name}-%{zeppelin_base_version}
 
 %build
 bash $RPM_SOURCE_DIR/do-component-build
@@ -131,5 +131,6 @@ chkconfig --del %{name}
 %attr(0755,zeppelin,zeppelin) %{etc_zeppelin}
 %attr(0755,zeppelin,zeppelin) %{var_lib_zeppelin}
 %attr(0755,zeppelin,zeppelin) %{var_run_zeppelin}
+%attr(0755,zeppelin,zeppelin) %{var_run_zeppelin}/webapps
 %attr(0755,zeppelin,zeppelin) %{var_log_zeppelin}
 %attr(0755,root,root)/%{initd_dir}/%{name}

@@ -15,6 +15,32 @@
 # limitations under the License.
 
 set -ex
+######################################################################
+# BIGTOP-2288 Please remove this patch when maven repository is updated
+# with version of leveldbjni-all library that is not x86 specific
+if [ $HOSTTYPE = "powerpc64le" ] ; then
+        #download the POWER version of leveldb
+        git clone git://github.com/ibmsoe/leveldb.git
+        git clone https://github.com/ibmsoe/leveldbjni.git
+        export SNAPPY_HOME=/usr/lib
+        export LEVELDB_HOME=`cd leveldb; pwd`
+        export LEVELDBJNI_HOME=`cd leveldbjni; pwd`
+        export LIBRARY_PATH=${SNAPPY_HOME}
+        cd ${LEVELDB_HOME}
+        export C_INCLUDE_PATH=${LIBRARY_PATH}
+        export CPLUS_INCLUDE_PATH=${LIBRARY_PATH}
+        git apply ../leveldbjni/leveldb.patch
+        make libleveldb.a
+        #Now use maven to build and update the local maven repository with ppc version of
+        #leveldbjni.
+        cd ${LEVELDBJNI_HOME}
+        mvn clean install -DskipTests -P download -Plinux64,all
+        cd ..
+        #cleanup
+        rm -rf ${LEVELDBJNI_HOME}
+        rm -rf ${LEVELDB_HOME}
+fi
+## BIGTOP-2288
 
 . `dirname $0`/bigtop.bom
 
@@ -29,7 +55,7 @@ mkdir build/src
 # Build artifacts
 MAVEN_OPTS="-Dzookeeper.version=$ZOOKEEPER_VERSION"
 MAVEN_OPTS="$MAVEN_OPTS -DskipTests -DskipTest -DskipITs"
-mvn $ANT_OPTS $BUNDLE_SNAPPY -Pdist -Pnative -Psrc -Dtar ${MAVEN_OPTS} install "$@"
+mvn $ANT_OPTS $BUNDLE_SNAPPY -Pdist -Pnative -Psrc -Dtar ${MAVEN_OPTS} -Dtomcat.version=${BIGTOP_TOMCAT_VERSION} -Dtomcat.download.url="http://archive.apache.org/dist/tomcat/tomcat-6/v${BIGTOP_TOMCAT_VERSION}/bin/apache-tomcat-${BIGTOP_TOMCAT_VERSION}.tar.gz" install "$@"
 mvn site site:stage ${MAVEN_OPTS} $@
 
 (cd build ; tar --strip-components=1 -xzvf  ../hadoop-dist/target/hadoop-${HADOOP_VERSION}.tar.gz)
